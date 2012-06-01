@@ -30,41 +30,59 @@ namespace Canon.Eos.Framework
                 this.LiveViewUpdate(this, eventArgs);            
         }
 
+        private string LiveViewMutexName
+        {
+            get
+            {
+                return liveViewMutexNamePrefix + "_" + this.Handle.ToString();
+            }
+        }
+
         private bool DownloadEvf()
         {
-            if ((this.LiveViewDevice & EosLiveViewDevice.Host) == EosLiveViewDevice.None)
+            if (!this.IsInHostLiveViewMode)
                 return false;
 
-            var memoryStream = IntPtr.Zero;
-            try
+            Boolean result = false;
+
+            Mutex liveViewMutex = new Mutex(false, this.LiveViewMutexName);
+            if (liveViewMutex.WaitOne(EosCamera.WaitTimeoutForNextLiveDownload, true))
             {
-                Util.Assert(Edsdk.EdsCreateMemoryStream(0, out memoryStream), "Failed to create memory stream.");
-                using (var image = EosLiveImage.CreateFromStream(memoryStream))
+                var memoryStream = IntPtr.Zero;
+                try
                 {
-                    Util.Assert(Edsdk.EdsDownloadEvfImageCdecl(this.Handle, image.Handle), "Failed to download evf image.");
-
-                    var converter = new EosConverter();
-                    this.OnLiveViewUpdate(new EosLiveImageEventArgs(converter.ConvertImageStreamToBytes(memoryStream))
+                    Util.Assert(Edsdk.EdsCreateMemoryStream(0, out memoryStream), "Failed to create memory stream.");
+                    using (var image = EosLiveImage.CreateFromStream(memoryStream))
                     {
-                        Zoom = image.Zoom,
-                        ZommBounds = image.ZoomBounds,
-                        ImagePosition = image.ImagePosition,
-                        Histogram = image.Histogram,
-                    });
+                        Util.Assert(Edsdk.EdsDownloadEvfImageCdecl(this.Handle, image.Handle), "Failed to download evf image.");
+
+                        var converter = new EosConverter();
+                        this.OnLiveViewUpdate(new EosLiveImageEventArgs(converter.ConvertImageStreamToBytes(memoryStream))
+                        {
+                            Zoom = image.Zoom,
+                            ZommBounds = image.ZoomBounds,
+                            ImagePosition = image.ImagePosition,
+                            Histogram = image.Histogram,
+                        });
+                    }
                 }
-            }
-            catch (EosException eosEx)
-            {
-                if (eosEx.EosErrorCode != EosErrorCode.DeviceBusy && eosEx.EosErrorCode != EosErrorCode.ObjectNotReady)
-                    throw;
-            }
-            finally
-            {
-                if (memoryStream != IntPtr.Zero)
-                    Edsdk.EdsRelease(memoryStream);
+                catch (EosException eosEx)
+                {
+                    if (eosEx.EosErrorCode != EosErrorCode.DeviceBusy && eosEx.EosErrorCode != EosErrorCode.ObjectNotReady)
+                        throw;
+                }
+                finally
+                {
+                    if (memoryStream != IntPtr.Zero)
+                        Edsdk.EdsRelease(memoryStream);
+                }
+
+                liveViewMutex.ReleaseMutex();
+				result = true;
             }
 
-            return true;
+            liveViewMutex.Dispose();
+            return result;
         }
 
         private void StartDownloadEvfInBackGround()
@@ -73,7 +91,7 @@ namespace Canon.Eos.Framework
             backgroundWorker.Work(() =>
             {
                 while (this.DownloadEvf())
-                    Thread.Sleep(EosCamera.WaitTimeoutForNextLiveDownload);                
+                    Thread.Sleep(EosCamera.WaitTimeoutForNextLiveDownload);
             });
         }
 
@@ -87,7 +105,7 @@ namespace Canon.Eos.Framework
             }
             else if (_liveMode && (this.LiveViewDevice & EosLiveViewDevice.Host) == EosLiveViewDevice.None)
             {
-                _liveMode = false;                
+                _liveMode = false;
                 this.OnLiveViewStopped(EventArgs.Empty);
             }
         }

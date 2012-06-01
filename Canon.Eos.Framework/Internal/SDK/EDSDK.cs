@@ -122,6 +122,7 @@ namespace Canon.Eos.Framework.Internal.SDK
          Capture Properties
         ----------------------------------*/
         public const uint   PropID_AEMode               = 0x00000400;
+		public const uint   PropID_AEModeSelect         = 0x00000436;
         public const uint   PropID_DriveMode            = 0x00000401;
         public const uint   PropID_ISOSpeed             = 0x00000402;
         public const uint   PropID_MeteringMode         = 0x00000403;
@@ -167,6 +168,8 @@ namespace Canon.Eos.Framework.Internal.SDK
         public const uint   PropID_Evf_ImagePosition       = 0x0000050B;
 		public const uint   PropID_Evf_HistogramStatus     = 0x0000050C;
         public const uint   PropID_Evf_AFMode              = 0x0000050E;
+
+		public const uint   PropID_Record                  = 0x00000510;
              
         /*----------------------------------
          Image GPS Properties
@@ -492,6 +495,10 @@ namespace Canon.Eos.Framework.Internal.SDK
         public const uint   AEMode_Landscape        = 13;
         public const uint   AEMode_Closeup          = 14;
         public const uint   AEMode_FlashOff         = 15;
+        public const uint   AEMode_CreativeAuto     = 19;
+        public const uint   AEMode_Movie			= 20;
+        public const uint   AEMode_PhotoInMovie		= 21;
+		public const uint   AEMode_SceneIntelligentAuto = 22;
         public const uint   AEMode_Unknown          = 0xffffffff;
 
         /*-----------------------------------------------------------------------------
@@ -2125,6 +2132,7 @@ namespace Canon.Eos.Framework.Internal.SDK
             public string szFileName;
 
 			public uint format;
+			public uint dateTime;
 		} 
 
 

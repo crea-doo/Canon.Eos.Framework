@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using Canon.Eos.Framework.Eventing;
 using Canon.Eos.Framework.Helper;
 using Canon.Eos.Framework.Internal.SDK;
+using System.Threading;
 
 namespace Canon.Eos.Framework
 {
@@ -13,6 +14,8 @@ namespace Canon.Eos.Framework
         const int MaximumCopyrightLengthInBytes = 64;
         const int MaximumArtistLengthInBytes = 64;
         const int MaximumOwnerNameLengthInBytes = 32;
+
+        private const string liveViewMutexNamePrefix = "Canon.Eos.Framework.liveViewMutex";
 
         private Edsdk.EdsDeviceInfo _deviceInfo;
         private string _picturePath;
@@ -193,7 +196,15 @@ namespace Canon.Eos.Framework
         public EosLiveViewDevice LiveViewDevice
         {
             get { return (EosLiveViewDevice)this.GetPropertyIntegerData(Edsdk.PropID_Evf_OutputDevice); }
-            set { this.SetPropertyIntegerData(Edsdk.PropID_Evf_OutputDevice, (long)value); }
+            set {
+                Mutex liveViewMutex = new Mutex(true, this.LiveViewMutexName);
+                if (liveViewMutex.WaitOne(EosCamera.WaitTimeoutForNextLiveDownload, true))
+                {
+                    this.SetPropertyIntegerData(Edsdk.PropID_Evf_OutputDevice, (long)value);
+                    liveViewMutex.ReleaseMutex();
+                }
+                liveViewMutex.Dispose();
+            }
         }
 
         /// <summary>
