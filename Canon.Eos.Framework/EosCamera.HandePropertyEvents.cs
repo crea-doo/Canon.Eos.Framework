@@ -11,6 +11,8 @@ namespace Canon.Eos.Framework
     partial class EosCamera
     {        
         private bool _liveMode;
+        private bool _cancelLiveViewRequested;
+        private bool _pauseLiveViewRequested;
 
         private void OnLiveViewStarted(EventArgs eventArgs)
         {
@@ -24,65 +26,57 @@ namespace Canon.Eos.Framework
                 this.LiveViewStopped(this, eventArgs);
         }
 
+        private void OnLiveViewPaused(EventArgs eventArgs)
+        {
+            if (this.LiveViewPaused != null)
+                this.LiveViewPaused(this, eventArgs);
+        }
+
         private void OnLiveViewUpdate(EosLiveImageEventArgs eventArgs)
         {
             if (this.LiveViewUpdate != null)
                 this.LiveViewUpdate(this, eventArgs);            
         }
 
-        private string LiveViewMutexName
-        {
-            get
-            {
-                return liveViewMutexNamePrefix + "_" + this.Handle.ToString();
-            }
-        }
-
         private bool DownloadEvf()
         {
-            if (!this.IsInHostLiveViewMode)
+            // Do not download if pauseUpdate requested
+            if (_pauseLiveViewRequested)
+                return true;
+
+            if ((this.LiveViewDevice & EosLiveViewDevice.Host) == EosLiveViewDevice.None || _cancelLiveViewRequested)
                 return false;
 
-            Boolean result = false;
-
-            Mutex liveViewMutex = new Mutex(false, this.LiveViewMutexName);
-            if (liveViewMutex.WaitOne(EosCamera.WaitTimeoutForNextLiveDownload, true))
+            var memoryStream = IntPtr.Zero;
+            try
             {
-                var memoryStream = IntPtr.Zero;
-                try
+                Util.Assert(Edsdk.EdsCreateMemoryStream(0, out memoryStream), "Failed to create memory stream.");
+                using (var image = EosLiveImage.CreateFromStream(memoryStream))
                 {
-                    Util.Assert(Edsdk.EdsCreateMemoryStream(0, out memoryStream), "Failed to create memory stream.");
-                    using (var image = EosLiveImage.CreateFromStream(memoryStream))
+                    Util.Assert(Edsdk.EdsDownloadEvfImageCdecl(this.Handle, image.Handle), "Failed to download evf image.");
+
+                    var converter = new EosConverter();
+                    this.OnLiveViewUpdate(new EosLiveImageEventArgs(converter.ConvertImageStreamToBytes(memoryStream))
                     {
-                        Util.Assert(Edsdk.EdsDownloadEvfImageCdecl(this.Handle, image.Handle), "Failed to download evf image.");
-
-                        var converter = new EosConverter();
-                        this.OnLiveViewUpdate(new EosLiveImageEventArgs(converter.ConvertImageStreamToBytes(memoryStream))
-                        {
-                            Zoom = image.Zoom,
-                            ZommBounds = image.ZoomBounds,
-                            ImagePosition = image.ImagePosition,
-                            Histogram = image.Histogram,
-                        });
-                    }
+                        Zoom = image.Zoom,
+                        ZommBounds = image.ZoomBounds,
+                        ImagePosition = image.ImagePosition,
+                        Histogram = image.Histogram,
+                    });
                 }
-                catch (EosException eosEx)
-                {
-                    if (eosEx.EosErrorCode != EosErrorCode.DeviceBusy && eosEx.EosErrorCode != EosErrorCode.ObjectNotReady)
-                        throw;
-                }
-                finally
-                {
-                    if (memoryStream != IntPtr.Zero)
-                        Edsdk.EdsRelease(memoryStream);
-                }
-
-                liveViewMutex.ReleaseMutex();
-				result = true;
+            }
+            catch (EosException eosEx)
+            {
+                if (eosEx.EosErrorCode != EosErrorCode.DeviceBusy && eosEx.EosErrorCode != EosErrorCode.ObjectNotReady)
+                    throw;
+            }
+            finally
+            {
+                if (memoryStream != IntPtr.Zero)
+                    Edsdk.EdsRelease(memoryStream);
             }
 
-            liveViewMutex.Dispose();
-            return result;
+            return true;
         }
 
         private void StartDownloadEvfInBackGround()
@@ -90,8 +84,23 @@ namespace Canon.Eos.Framework
             var backgroundWorker = new BackgroundWorker();
             backgroundWorker.Work(() =>
             {
+
                 while (this.DownloadEvf())
+                {  
+                    // Take Picture requested?
+                    if (this._pauseLiveViewRequested)
+                    {
+                        this.OnLiveViewPaused(EventArgs.Empty);
+                        while (this._pauseLiveViewRequested)
+                        {
+                            //Wait until picture processing is finished
+                            Thread.Sleep(EosCamera.WaitTimeoutForNextLiveDownload);
+                        }
+                    }
                     Thread.Sleep(EosCamera.WaitTimeoutForNextLiveDownload);
+                }
+                
+                this.LiveViewDevice = EosLiveViewDevice.None;
             });
         }
 
@@ -105,7 +114,7 @@ namespace Canon.Eos.Framework
             }
             else if (_liveMode && (this.LiveViewDevice & EosLiveViewDevice.Host) == EosLiveViewDevice.None)
             {
-                _liveMode = false;
+                _liveMode = false;                
                 this.OnLiveViewStopped(EventArgs.Empty);
             }
         }
